@@ -1,6 +1,5 @@
 import argparse
 from main import main
-# /lfs/usrhome/oth/ee18b103/DDP
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -20,8 +19,6 @@ if __name__ == '__main__':
 
     parser.add_argument("--direc_main", type=str, help="Main directory", default='D:/DDP/alternating_approach/')
     parser.add_argument("--direc", type=str, help="Directory within main directory used for this specific run", default='D:/DDP/alternating_approach/run-2/')
-    # parser.add_argument("--direc_main", type=str, help="Main directory", default='/lfs/usrhome/oth/ee18b103/DDP/data/')
-    # parser.add_argument("--direc", type=str, help="Directory within main directory used for this specific run", default='/lfs/usrhome/oth/ee18b103/DDP/data/run-1/')
 
     parser.add_argument("--import_old_datasets", action='store_true', help="Want to use old datasets? Add flag if you want True")
     parser.add_argument("--import_old_channels", action='store_true', help="Want to use old channels? Add flag if you want True")

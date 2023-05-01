@@ -5,7 +5,6 @@ from torch.utils.data import DataLoader, TensorDataset
 from torch import optim
 from torchinfo import summary
 from scipy.linalg import fractional_matrix_power
-from contextlib import redirect_stdout
 import time
 import sys
 import logging
