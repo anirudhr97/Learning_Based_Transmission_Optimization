@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from torch import optim
 from torchinfo import summary
 from scipy.linalg import fractional_matrix_power
+from pprint import pprint
 import time
 import sys
 import logging
@@ -22,6 +23,9 @@ def main(**kwargs):
     ######################################################################
     # Boolean for debugging
     DEBUG = False
+
+    # List for printing all the relevant results at the end of the run
+    ret_list = []
 
     # Logging configuration
     logging.basicConfig(
@@ -79,7 +83,7 @@ def main(**kwargs):
 
     ######################################################################
     ### Some basic global variables that will be useful
-    # Number of base stations (B)
+    # Number of base stations (B) [Currently, we only support B = 1]
     NUM_BS = kwargs['num_bs']
     # Number of users per base station (K)
     NUM_USERS = kwargs['num_users']
@@ -92,10 +96,12 @@ def main(**kwargs):
     # Standard deviation of distribution from which we sample the symbols to be transmitted
     SIGMA_SYMBOL = 1
     # Standard deviation of noise while observing output at any user
-    # SIGMA0 = (3.162278e-12)**0.5
-    SIGMA0 = (1.8e-12)**0.5         # Matching value from WSR maximization paper
+    SIGMA0 = (3.162278e-12)**0.5
+    # SIGMA0 = (1.8e-12)**0.5         # Matching value from WSR maximization paper
     # Standard deviation of noise vectors while generating pilots
     SIGMA1 = (1e-13)**0.5
+
+    print(SIGMA0, SIGMA1)
 
     ######################################################################
     # Path for storing or accessing channel from BS to IRS
@@ -180,7 +186,7 @@ def main(**kwargs):
     DIST_BS_IRS = np.abs(LOC_BS - LOC_IRS).astype(np.float32)
 
     # Radius of the circle within which all users are found
-    RADIUS_USERS = 1.0        # 10
+    RADIUS_USERS = 25.0     # 10.0
     # Offset around which all users are found
     OFFSET_USERS = 150 + 30j
     # Location of the users
@@ -216,10 +222,12 @@ def main(**kwargs):
     # Total downlink power constraint
     TOTAL_POWER_CONSTRAINT_dBm = kwargs['down_power']
     TOTAL_POWER_CONSTRAINT = 1e-3*(10**(TOTAL_POWER_CONSTRAINT_dBm/10))
+    # print(TOTAL_POWER_CONSTRAINT)
 
     # Total uplink power constraint
-    TOTAL_UP_POWER_CONSTRAINT_dBm = kwargs['up_power']     # 30
+    TOTAL_UP_POWER_CONSTRAINT_dBm = kwargs['up_power']
     TOTAL_UP_POWER_CONSTRAINT = 1e-3*(10**(TOTAL_UP_POWER_CONSTRAINT_dBm/10))
+    # print(TOTAL_UP_POWER_CONSTRAINT)
 
     ######################################################################
     ######################################################################
@@ -304,9 +312,15 @@ def main(**kwargs):
                     # Symbols we will be sending
                     up_vals = np.eye(params['num_users'], dtype=np.complex64)*np.sqrt(params['num_users']*params['total_up_power_constraint'])
                     symbols = np.tile(up_vals, params['pilot_length']//params['num_users'])
+                    # print('\n\nSymbols')
+                    # pprint(up_vals)
+                    # print('')
+                    # pprint(symbols)
 
                     # Noise
-                    noise = params['sigma1']*(generate_complex_gaussian_array((params['num_antennas'], params['pilot_length'])))
+                    noise = params['sigma1']*generate_complex_gaussian_array((params['num_antennas'], params['pilot_length']))
+                    # print('\n\nNoise')
+                    # pprint(noise)
 
                     # Make sure pilot length is a mulitple of number of users
                     assert params['pilot_length']%params['num_users'] == 0
@@ -316,16 +330,37 @@ def main(**kwargs):
                     v = np.exp(1j*angles).astype(np.complex64)
                     v = np.repeat(v, params['num_users'], axis=1)
                     assert v.shape == (params['num_reflectors'], params['pilot_length'])
+                    # print('\n\nAngles')
+                    # pprint(angles)
+                    # print('')
+                    # pprint(v)
+
+                    # print('\n\nAbs max of channels: GDR')
+                    # print(np.amax(np.abs(G)))
+                    # print(np.amax(np.abs(D)))
+                    # print(np.amax(np.abs(R)))
+                    # print('')
 
                     # Forming the pilots
                     pilots = np.zeros((params['num_antennas'], params['pilot_length']), dtype = np.complex64)
                     for i in range(params['pilot_length']):
-                        pilots[:, i:i+1] = (D + G@np.diag(v[:, i])@R)@symbols[:, i:i+1] + noise[:, i:i+1]
+                        eff_channel = D + (G @ np.diag(v[:, i])) @ R
+                        pilots[:, i:i+1] = eff_channel @ symbols[:, i:i+1] + noise[:, i:i+1]
+
+                    # print('\n\nPilots')
+                    # print(eff_channel)
+                    # print('')
+                    # pprint(pilots)
 
                     # Editing `dataset` to include this data sample
                     dataset[idx] = np.concatenate((pilots.flatten('F').real, pilots.flatten('F').imag))
+
+                # Normalization corresponding to the post-processing (match filtering)
+                # Commented out as it's unnecessary since we anyways normalize after this
+                # dataset = dataset*np.sqrt(params['total_up_power_constraint']/params['num_users'])
+
                 # Saving the dataset
-                np.save(params['train_dataset_path'], dataset)
+                # np.save(params['train_dataset_path'], dataset)
 
             elif choice == 'test':
                 dataset = np.zeros((params['num_test_samples'], 2*params['num_antennas']*params['pilot_length']), dtype = np.float32)
@@ -342,13 +377,12 @@ def main(**kwargs):
                             D = params['channels']['D'][idx//params['batch_size']].astype(np.complex64)
                             R = params['channels']['R'][idx//params['batch_size']].astype(np.complex64)
 
-
                     # Symbols we will be sending
                     up_vals = np.eye(params['num_users'], dtype=np.complex64)*np.sqrt(params['num_users']*params['total_up_power_constraint'])
                     symbols = np.tile(up_vals, params['pilot_length']//params['num_users'])
 
                     # Noise
-                    noise = params['sigma1']*(generate_complex_gaussian_array((params['num_antennas'], params['pilot_length'])))
+                    noise = params['sigma1']*generate_complex_gaussian_array((params['num_antennas'], params['pilot_length']))
 
                     # Randomly sampling angles for IRS phase
                     angles = 2*np.pi*np.random.rand(params['num_reflectors'], params['pilot_length']//params['num_users'])
@@ -359,12 +393,18 @@ def main(**kwargs):
                     # Forming the pilots
                     pilots = np.zeros((params['num_antennas'], params['pilot_length']), dtype = np.complex64)
                     for i in range(params['pilot_length']):
-                        pilots[:, i:i+1] = (D + G@np.diag(v[:, i])@R)@symbols[:, i:i+1] + noise[:, i:i+1]
+                        eff_channel = D + (G @ np.diag(v[:, i])) @ R
+                        pilots[:, i:i+1] = eff_channel @ symbols[:, i:i+1] + noise[:, i:i+1]
 
                     # Editing `dataset` to include this data sample
                     dataset[idx] = np.concatenate((pilots.flatten('F').real, pilots.flatten('F').imag))
+
+                # Normalization corresponding to the post-processing (match filtering)
+                # Commented out as it's unnecessary since we anyways normalize after this
+                # dataset = dataset*np.sqrt(params['total_up_power_constraint']/params['num_users'])
+
                 # Saving the dataset
-                np.save(params['test_dataset_path'], dataset)
+                # np.save(params['test_dataset_path'], dataset)
 
             else:
                 sys.exit('$$$$$ make_dataset(): Invalid `choice` for dataset. Needs to be "train" or "test".')
@@ -416,7 +456,7 @@ def main(**kwargs):
                     symbols = np.tile(up_vals, params['pilot_length']//params['num_users'])
 
                     # Noise
-                    noise = params['sigma1']*(generate_complex_gaussian_array((params['num_antennas'], params['pilot_length'])))
+                    noise = params['sigma1']*generate_complex_gaussian_array((params['num_antennas'], params['pilot_length']))
 
                     # Make sure pilot length is a mulitple of number of users
                     assert params['pilot_length']%params['num_users'] == 0
@@ -430,13 +470,19 @@ def main(**kwargs):
                     # Forming the pilots
                     pilots = np.zeros((params['num_antennas'], params['pilot_length']), dtype = np.complex64)
                     for i in range(params['pilot_length']):
-                        pilots[:, i:i+1] = (D + G@np.diag(v[:, i])@R)@symbols[:, i:i+1] + noise[:, i:i+1]
+                        eff_channel = D + (G @ np.diag(v[:, i])) @ R
+                        pilots[:, i:i+1] = eff_channel @ symbols[:, i:i+1] + noise[:, i:i+1]
 
                     # Editing `dataset` to include this data sample
                     pilots = pilots.T
                     dataset[idx] = np.concatenate((pilots.real, pilots.imag), axis=1)
+
+                # Normalization corresponding to the post-processing (match filtering)
+                # Commented out as it's unnecessary since we anyways normalize after this
+                # dataset = dataset*np.sqrt(params['total_up_power_constraint']/params['num_users'])
+
                 # Saving the dataset
-                np.save(params['train_dataset_path'], dataset)
+                # np.save(params['train_dataset_path'], dataset)
 
             elif choice == 'test':
                 dataset = np.zeros((params['num_test_samples'], params['pilot_length'], 2*params['num_antennas']), dtype = np.float32)
@@ -458,7 +504,7 @@ def main(**kwargs):
                     symbols = np.tile(up_vals, params['pilot_length']//params['num_users'])
 
                     # Noise
-                    noise = params['sigma1']*(generate_complex_gaussian_array((params['num_antennas'], params['pilot_length'])))
+                    noise = params['sigma1']*generate_complex_gaussian_array((params['num_antennas'], params['pilot_length']))
 
                     # Randomly sampling angles for IRS phase
                     angles = 2*np.pi*np.random.rand(params['num_reflectors'], params['pilot_length']//params['num_users'])
@@ -469,13 +515,19 @@ def main(**kwargs):
                     # Forming the pilots
                     pilots = np.zeros((params['num_antennas'], params['pilot_length']), dtype = np.complex64)
                     for i in range(params['pilot_length']):
-                        pilots[:, i:i+1] = (D + G@np.diag(v[:, i])@R)@symbols[:, i:i+1] + noise[:, i:i+1]
+                        eff_channel = D + (G @ np.diag(v[:, i])) @ R
+                        pilots[:, i:i+1] = eff_channel @ symbols[:, i:i+1] + noise[:, i:i+1]
 
                     # Editing `dataset` to include this data sample
                     pilots = pilots.T
                     dataset[idx] = np.concatenate((pilots.real, pilots.imag), axis=1)
+
+                # Normalization corresponding to the post-processing (match filtering)
+                # Commented out as it's unnecessary since we anyways normalize after this
+                # dataset = dataset*np.sqrt(params['total_up_power_constraint']/params['num_users'])
+
                 # Saving the dataset
-                np.save(params['test_dataset_path'], dataset)
+                # np.save(params['test_dataset_path'], dataset)
 
             else:
                 sys.exit('$$$$$ make_dataset(): Invalid `choice` for dataset. Needs to be "train" or "test".')
@@ -496,21 +548,38 @@ def main(**kwargs):
 
     # Train dataset
     if which_model == 'MLP':
-        train_data = torch.tensor(get_dataset_MLP(choice='train', make_new=MAKE_NEW_DATASETS)['dataset'], device=device)
-        logit('Train dataset size: %s' % str(train_data.size()))
+        train_data = get_dataset_MLP(choice='train', make_new=MAKE_NEW_DATASETS)['dataset']
+        logit('Train dataset size: %s' % str(train_data.shape))
     else:
-        train_data = torch.tensor(get_dataset_RNN(choice='train', make_new=MAKE_NEW_DATASETS)['dataset'], device=device)
-        logit('Train dataset size: %s' % str(train_data.size()))
+        train_data = get_dataset_RNN(choice='train', make_new=MAKE_NEW_DATASETS)['dataset']
+        logit('Train dataset size: %s' % str(train_data.shape))
+
+    # Normalizing the training data (Otherwise the input pilots will all be very low in value)
+    # Finding the max absolute value of the training data
+    max_abs_val = np.amax(np.abs(train_data))
+    print('Max absolute value(train data): ', max_abs_val)
+    train_data = train_data/max_abs_val
+    # Saving the normalized train dataset
+    np.save(PARAMS['train_dataset_path'], train_data)
+
+    train_data = torch.tensor(train_data).to(device)
     train_dataset = TensorDataset(train_data)
     train_loader = DataLoader(train_dataset, batch_size=PARAMS['batch_size'], shuffle=False)
 
     # Test dataset
     if which_model == 'MLP':
-        test_data = torch.tensor(get_dataset_MLP(choice='test', make_new=MAKE_NEW_DATASETS)['dataset'], device=device)
-        logit('Test dataset size: %s' % str(test_data.size()))
+        test_data = get_dataset_MLP(choice='test', make_new=MAKE_NEW_DATASETS)['dataset']
+        logit('Test dataset size: %s' % str(test_data.shape))
     else:
-        test_data = torch.tensor(get_dataset_RNN(choice='test', make_new=MAKE_NEW_DATASETS)['dataset'], device=device)
-        logit('Test dataset size: %s' % str(test_data.size()))
+        test_data = get_dataset_RNN(choice='test', make_new=MAKE_NEW_DATASETS)['dataset']
+        logit('Test dataset size: %s' % str(test_data.shape))
+
+    # Normalizing with the same value as the training data
+    test_data = test_data/max_abs_val
+    # Saving the normalized test dataset
+    np.save(PARAMS['test_dataset_path'], test_data)
+
+    test_data = torch.tensor(test_data).to(device)
     test_dataset = TensorDataset(test_data)
     test_loader = DataLoader(test_dataset, batch_size=PARAMS['batch_size'], shuffle=False)
 
@@ -548,7 +617,7 @@ def main(**kwargs):
     elif which_model == 'MLP':
         MODEL_PARAMS = {
             'type': which_model,
-            'n_neurons': 100
+            'n_neurons': 200
         }
     else:
         sys.exit('$$$$$ main(): Invalid `which_model` to create `MODEL_PARAMS`.')
@@ -556,23 +625,27 @@ def main(**kwargs):
     # Creating the model
     if MODEL_PARAMS['type'] == 'WMMSE':
         model = UnfoldedWMMSE(model_params = MODEL_PARAMS, params = PARAMS)
-        model.to(device)
+        model = model.to(device)
         summary(model, (1, PARAMS['pilot_length'], 2*PARAMS['num_antennas']))
+
     elif MODEL_PARAMS['type'] == 'vanilla':
         model = VanillaRNN(model_params = MODEL_PARAMS, params = PARAMS)
-        model.to(device)
+        model = model.to(device)
         summary(model, (1, PARAMS['pilot_length'], 2*PARAMS['num_antennas']))
+
     elif MODEL_PARAMS['type'] == 'LSTM':
         model = LSTM(model_params = MODEL_PARAMS, params = PARAMS)
-        model.to(device)
+        model = model.to(device)
         summary(model, (1, PARAMS['pilot_length'], 2*PARAMS['num_antennas']))
+
     elif MODEL_PARAMS['type'] == 'GRU':
         model = GRU(model_params = MODEL_PARAMS, params = PARAMS)
-        model.to(device)
+        model = model.to(device)
         summary(model, (1, PARAMS['pilot_length'], 2*PARAMS['num_antennas']))
+
     elif MODEL_PARAMS['type'] == 'MLP':
         model = BeamFormer(model_params = MODEL_PARAMS, params = PARAMS)
-        model.to(device)
+        model = model.to(device)
         summary(model, (1, 2*PARAMS['num_antennas']*PARAMS['pilot_length']))
 
     # Loading the model if already trained
@@ -730,7 +803,7 @@ def main(**kwargs):
                 temp = torch.square(torch.abs(torch.squeeze(torch.mm(tmp2, bf))))
                 temp_sum = torch.sum(temp)
                 # Calculating the rate for the ith user
-                rates[i] = torch.log(1 + (temp[i])/(temp_sum - temp[i] + params['sigma0']**2))
+                rates[i] = torch.log2(1 + (temp[i])/(temp_sum - temp[i] + params['sigma0']**2))
 
             # Finding sum rate
             sum_rates[idx] = torch.sum(rates)
@@ -804,7 +877,7 @@ def main(**kwargs):
                 temp = torch.square(torch.abs(torch.squeeze(torch.mm(tmp2, bf))))
                 temp_sum = torch.sum(temp)
                 # Calculating the rate for the ith user
-                rates[i] = torch.log(1 + (temp[i])/(temp_sum - temp[i] + params['sigma0']**2))
+                rates[i] = torch.log2(1 + (temp[i])/(temp_sum - temp[i] + params['sigma0']**2))
 
             # Finding sum rate
             sum_rates[idx] = torch.sum(rates)
@@ -871,7 +944,7 @@ def main(**kwargs):
         sum1 = torch.sum(prod_abs_sq, dim=2)
 
         sinr = prod_abs_sq_diag / (sum1 - prod_abs_sq_diag + params['sigma0']**2)
-        rates = torch.log(1 + sinr)
+        rates = torch.log2(1 + sinr)
         sum_rates = torch.sum(rates, dim=1)
         loss = -torch.mean(sum_rates)
 
@@ -935,7 +1008,7 @@ def main(**kwargs):
         sum1 = torch.sum(prod_abs_sq, dim=2)
 
         sinr = prod_abs_sq_diag / (sum1 - prod_abs_sq_diag + params['sigma0']**2)
-        rates = torch.log(1 + sinr)
+        rates = torch.log2(1 + sinr)
         sum_rates = torch.sum(rates, dim=1)
         loss = -torch.mean(sum_rates)
 
@@ -943,20 +1016,18 @@ def main(**kwargs):
 
     ######################################################################
     # Sum Rate Loss
-    # loss_fn = sum_rate_loss
-    loss_fn = opt_sum_rate_loss
+    # Of the above defined 4 loss functions, the ones with prefix 'opt_' are the ones that are optimized for parallelization
+    loss_fn = opt_sum_rate_loss_conj
 
     # Adam optimizer
     optimizer = optim.Adam(model.parameters(), lr=PARAMS['lrate'])
+    # optimizer = optim.SGD(model.parameters(), lr=PARAMS['lrate'], momentum=0.9)
     if PARAMS['use_LR_Plateau']:
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        scheduler = torch.optim.lr_scheduler.StepLR(
             optimizer,
-            mode = 'min',
-            factor = 0.6,
-            patience = 1,
-            threshold = 1e-2,
-            threshold_mode = 'abs',
-            verbose = True
+            step_size=40,
+            gamma=0.5,
+            verbose=True
         )
 
     ######################################################################
@@ -967,7 +1038,6 @@ def main(**kwargs):
     losses_test_min = np.inf
 
     interval = (PARAMS['num_train_samples']//PARAMS['batch_size'])//5
-    # interval = 20
     start = time.time()
     for i in range(PARAMS['num_epochs']):
         logit('')
@@ -977,7 +1047,8 @@ def main(**kwargs):
         # Training the network for this epoch
         temp = train_loop(loaders, model, loss_fn, optimizer, interval)
         if PARAMS['use_LR_Plateau']:
-            scheduler.step(temp['losses_test'][-1])
+            # scheduler.step(temp['losses_test'][-1])
+            scheduler.step()
         losses += temp['losses']
         losses_test += temp['losses_test']
     temp = test_loop(loaders, model, loss_fn)
@@ -997,6 +1068,9 @@ def main(**kwargs):
     logit('Train Loss after training = %.5f' % (losses[-1]))
     logit('Test Sum Rate after training = %.5f' % (-losses_test[-1]))
     logit('Test Loss after training = %.5f' % (losses_test[-1]))
+
+    # Saving values to ret_list
+    ret_list.extend([end-start, -losses_test[-1], -losses[-1]])
 
     # Plotting of training and test metrics
     prefix = direc + PARAMS['model_name'] + f'_PL_{PARAMS["pilot_length"]}'
@@ -1061,7 +1135,7 @@ def main(**kwargs):
         Function to calculate capacity
         """
         # Initial covariance matrices for each of the users
-        cov = np.random.rand(params['num_users'], 1, 1).astype(np.complex128)
+        cov = np.random.rand(params['num_users'], 1, 1).astype(np.complex64)
 
         for _ in range(max_iter):
             tmp_list = []
@@ -1074,7 +1148,7 @@ def main(**kwargs):
             Dinv_list = []
             Uh_list = []
             for i in range(params['num_users']):
-                tmp1 = np.eye(params['num_antennas'], dtype=np.complex128)
+                tmp1 = np.eye(params['num_antennas'], dtype=np.complex64)
                 tmp2 = H[i] @ fractional_matrix_power(tmp1 + tmp_list_sum - tmp_list[i], -0.5)
 
                 # Computing svd
@@ -1087,7 +1161,7 @@ def main(**kwargs):
                 Dinv_diag_list.append(np.diagonal(Dinv))
 
             # Calculating lambda
-            level, _ = water_fill(np.concatenate(Dinv_diag_list).astype(np.float64), params['total_power_constraint'])
+            level, _ = water_fill(np.concatenate(Dinv_diag_list).astype(np.float32), params['total_power_constraint'])
 
             for k in range(params['num_users']):
                 Lambda = np.maximum(level*np.eye(1) - Dinv_list[k], np.zeros_like(D))
@@ -1096,10 +1170,10 @@ def main(**kwargs):
                 cov[k] = U_list[k] @ Lambda @ Uh_list[k]
 
         # Capcacity calculation for the obtained covariance matrices
-        accumulator = np.eye(params['num_antennas']).astype(np.complex128)
+        accumulator = np.eye(params['num_antennas']).astype(np.complex64)
         for i in range(params['num_users']):
             accumulator += H[i].conj().T @ cov[i] @ H[i]
-        capacity = np.log(np.linalg.det(accumulator))
+        capacity = np.log2(np.linalg.det(accumulator))
 
         return capacity
 
@@ -1107,7 +1181,7 @@ def main(**kwargs):
     cap_vals = []
 
     # Number of batches we want to use for capacity calculation
-    num_batches_cap = 10
+    num_batches_cap = 15
 
     for batch, X in enumerate(loaders['test']):
         # Getting the relevant channel for this batch
@@ -1133,6 +1207,9 @@ def main(**kwargs):
     logit('')
     logit('BASELINES:')
     logit('Average capacity on the Test set: %.5f, Std: %.5f' % (np.mean(cap_vals), np.std(cap_vals)))
+
+    # Adding capacity to ret_list
+    ret_list.append(np.mean(cap_vals))
 
     ######################################################################
     # Random theta and BF
@@ -1162,7 +1239,7 @@ def main(**kwargs):
                 temp = np.square(np.abs(np.squeeze(tmp2@bf)))
                 temp_sum = np.sum(temp)
                 # Calculating the rate for the ith user
-                rates[i] = np.log(1 + (temp[i])/(temp_sum - temp[i] + PARAMS['sigma0']**2))
+                rates[i] = np.log2(1 + (temp[i])/(temp_sum - temp[i] + PARAMS['sigma0']**2))
 
             # Finding sum rate
             sum_rates[idx] = np.sum(rates)
@@ -1192,6 +1269,9 @@ def main(**kwargs):
     
     logit('[Random theta, BF] Average SR: %.5f, Std: %.5f' % (np.mean(sum_rates), np.std(sum_rates)))
 
+    # Adding baseline to ret_list
+    ret_list.append(np.mean(sum_rates))
+
     ######################################################################
     # Random theta and Hermitian BF
     num_samples = 100
@@ -1220,6 +1300,9 @@ def main(**kwargs):
     
     logit('[Random theta, Hermitian BF] Average SR: %.5f, Std: %.5f' % (np.mean(sum_rates), np.std(sum_rates)))
 
+    # Adding baseline to ret_list
+    ret_list.append(np.mean(sum_rates))
+
     ######################################################################
     # Random theta and Zero-Forcing
     num_samples = 100
@@ -1247,3 +1330,10 @@ def main(**kwargs):
         sum_rates.append(calc_rate(beamformers, IRS_coeff, G, D, R, num_samples))
     
     logit('[Random theta, Zero-Forcing] Average SR: %.5f, Std: %.5f' % (np.mean(sum_rates), np.std(sum_rates)))
+
+    # Adding baseline to ret_list
+    ret_list.append(np.mean(sum_rates))
+
+    # Printing all the results together
+    print('\n')
+    print(ret_list)
