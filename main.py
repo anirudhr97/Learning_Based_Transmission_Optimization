@@ -1064,13 +1064,16 @@ def main(**kwargs):
     torch.save(model, PARAMS['model_save_path'])
 
     # Sum Rate at the end of training on the test dataset
-    logit('Train Sum Rate after training = %.5f' % (-losses[-1]))
-    logit('Train Loss after training = %.5f' % (losses[-1]))
-    logit('Test Sum Rate after training = %.5f' % (-losses_test[-1]))
-    logit('Test Loss after training = %.5f' % (losses_test[-1]))
+    logit('Train Sum Rate of the last batch of training = %.5f' % (-losses[-1]))
+    logit('Train Loss of the last batch of training = %.5f' % (losses[-1]))
+    logit('Best Test Sum Rate achieved in training = %.5f' % (-losses_test_min))
+    logit('Best Test Loss achieved in training = %.5f' % (losses_test_min))
+    # logit('Best Test Sum Rate after training = %.5f' % (-losses_test[-1]))
+    # logit('Best Test Loss after training = %.5f' % (losses_test[-1]))
 
     # Saving values to ret_list
-    ret_list.extend([end-start, -losses_test[-1], -losses[-1]])
+    ret_list.extend([end-start, -losses_test_min, -losses[-1]])
+    # ret_list.extend([end-start, -losses_test[-1], -losses[-1]])
 
     # Plotting of training and test metrics
     prefix = direc + PARAMS['model_name'] + f'_PL_{PARAMS["pilot_length"]}'
