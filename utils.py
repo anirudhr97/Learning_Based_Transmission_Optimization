@@ -4,6 +4,7 @@ import torch
 import matplotlib.pyplot as plt
 import torch.nn as nn
 import sys
+# Device configuration
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 ######################################################################
 class UnfoldedWMMSE(nn.Module):
@@ -143,17 +144,14 @@ class BeamFormer(nn.Module):
         # Declaring the layers
         self.fc1 = nn.Sequential(
             nn.Linear(2*self.params['num_antennas']*self.params['pilot_length'], model_params['n_neurons']),
-            # nn.ReLU()
             nn.LeakyReLU(negative_slope = 0.05)
         )
         self.fc2 = nn.Sequential(
             nn.Linear(model_params['n_neurons'], model_params['n_neurons']), 
-            # nn.ReLU()
             nn.LeakyReLU(negative_slope = 0.05)
         )
         self.fc3 = nn.Sequential(
             nn.Linear(model_params['n_neurons'], model_params['n_neurons']), 
-            # nn.ReLU()
             nn.LeakyReLU(negative_slope = 0.05)
         )
         self.fc4 = nn.Linear(model_params['n_neurons'], model_params['n_neurons'])
@@ -357,12 +355,12 @@ class GRU(nn.Module):
 ######################################################################
 def generate_complex_gaussian_array(shape):
     """
-    Function to generate an array of given shape sampled from the complex Gaussian distribution
+    Function to generate an array of given shape sampled from the Complex Normal Distribution
     Arguments:
     shape           List/tuple containing the shape of the array
 
     Returns:
-    matrix          numpy array sampled from complex Gaussian distribution of given `shape`
+    matrix          Numpy array sampled from Complex Normal Distribution of given `shape`
     """
     # Forming matrix
     matrix = (np.random.randn(*shape) + np.random.randn(*shape)*1j)/(2**0.5)
@@ -371,10 +369,10 @@ def generate_complex_gaussian_array(shape):
 
 def generate_channels(params, choice='randNormalC', save_channels=True):
     """
-    Function to generate the channels
+    Function to generate channels
     Arguments:
     params              Dictionary containing all the relevant parameters
-    choice              Method of channel generation used
+    choice              Channel generation method
     save_channels       Boolean to indicate whether we want to save the generated channels
 
     Returns:
@@ -527,7 +525,7 @@ def get_channels(params, import_old=False, choice='randNormalC'):
 ######################################################################
 def plotGraphs(losses, losses_test, interval, prefix=''):
     '''
-    Function to do all the relevant plotting of loss, accuracy vs iterations
+    Function to plot train and test loss vs iterations
     Arguments:
     losses          List containing loss on the training set every iteration
     losses_test     List containing loss on the test set every 'interval' iterations
@@ -536,6 +534,8 @@ def plotGraphs(losses, losses_test, interval, prefix=''):
     '''
     # Number of iterations carried out during training
     num_iters = len(losses)
+
+    # Plotting training sum rate
     plt.figure()
     plt.plot(np.arange(num_iters), -np.array(losses))
     plt.grid()
@@ -544,6 +544,7 @@ def plotGraphs(losses, losses_test, interval, prefix=''):
     plt.title('Train Sum Rate Plot')
     plt.savefig(prefix + '_train_sum_rate.png', bbox_inches='tight', dpi=300)
 
+    # Plotting test sum rate
     plt.figure()
     plt.plot(list(np.arange(0, num_iters, interval)) + [num_iters], -np.array(losses_test))
     plt.grid()

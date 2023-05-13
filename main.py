@@ -1,10 +1,11 @@
 # Importing relevant libraries
+from scipy.linalg import fractional_matrix_power
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 from torch import optim
 from torchinfo import summary
-from scipy.linalg import fractional_matrix_power
+
 from pprint import pprint
 import time
 import sys
@@ -29,18 +30,20 @@ def main(**kwargs):
 
     # Logging configuration
     logging.basicConfig(
-        filename=kwargs['direc'] + "Logs.log",
-        filemode="a",
-        format="%(asctime)s.%(msecs)03d :  %(message)s",
-        datefmt="%I:%M:%S",
-        level=logging.DEBUG
+        filename = kwargs['direc'] + "Logs.log",
+        filemode = "a",
+        format = "%(asctime)s.%(msecs)03d :  %(message)s",
+        datefmt = "%I:%M:%S",
+        level = logging.DEBUG
     )
     logging.getLogger("matplotlib.font_manager").disabled = True
 
+    # Function to log messages
     def logit(message):
         logging.info("%s", message)
 
     #####################################################################
+    # Logging all the run parameters for future reference
     logit('')
     logit('')
     logit('$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$')
@@ -71,7 +74,7 @@ def main(**kwargs):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logit('Using %s' % device)
 
-    # Directory where we save data, plots etc.
+    # Directory where we save the models, data, plots etc.
     direc = kwargs['direc']
     direc_main = kwargs['direc_main']
 
@@ -82,26 +85,26 @@ def main(**kwargs):
     L = kwargs['L']
 
     ######################################################################
-    ### Some basic global variables that will be useful
+    ### Some basic variables that will be useful
     # Number of base stations (B) [Currently, we only support B = 1]
     NUM_BS = kwargs['num_bs']
-    # Number of users per base station (K)
+    # Number of users (K)
     NUM_USERS = kwargs['num_users']
-    # Number of antennas in the base station (M)
+    # Number of antennas in a base station (M)
     NUM_ANTENNAS = kwargs['num_antennas']
-    # Number of reflective elements in the intelligent reflector (N)
+    # Number of reflective elements in the intelligent reflective surface (N)
     NUM_REFLECTORS = kwargs['num_reflectors']
 
     ######################################################################
     # Standard deviation of distribution from which we sample the symbols to be transmitted
     SIGMA_SYMBOL = 1
-    # Standard deviation of noise while observing output at any user
-    SIGMA0 = (3.162278e-12)**0.5
-    # SIGMA0 = (1.8e-12)**0.5         # Matching value from WSR maximization paper
-    # Standard deviation of noise vectors while generating pilots
-    SIGMA1 = (1e-13)**0.5
 
-    print(SIGMA0, SIGMA1)
+    # Standard deviation of noise while observing output at any user (Downlink)
+    SIGMA0 = (3.162278e-12)**0.5
+    # SIGMA0 = (3.162278e-10)**0.5
+    # SIGMA0 = (1.8e-12)**0.5         # Matching value from WSR maximization paper
+    # Standard deviation of noise vectors while generating pilots (Uplink)
+    SIGMA1 = (1e-13)**0.5
 
     ######################################################################
     # Path for storing or accessing channel from BS to IRS
@@ -133,10 +136,11 @@ def main(**kwargs):
     # Learning Rate
     LEARNING_RATE = kwargs['learning_rate']
     # Boolean to indicate whether we want to use ReduceLROnPlateau
+    # Currently, this implements StepLR instead
     USE_LR_PLATEAU = False
 
-    # Whether we want to use multi-channel train
-    # If True, we will use different channels for each batch
+    # Whether we want to use multi-channel train and test datasets
+    # If True, each batch of the train and test datasets will use a different channel
     # Note: Ensure that the test and train set size is a multiple of batch size
     MULTI_CH_TRAIN = True
     assert NUM_TRAIN_SAMPLES % BATCH_SIZE == 0
@@ -147,6 +151,9 @@ def main(**kwargs):
     # Number of different channels we will use for testing
     NUM_TEST_CHANNELS = NUM_TEST_SAMPLES // BATCH_SIZE if MULTI_CH_TRAIN else 1
     # Whether we want to use new channels for testing
+    # If True, we will use channels that are different from the ones used for training
+    # Note: This is only relevant if MULTI_CH_TRAIN is True
+    # If False, we will use the same channels for testing as we used for training
     NEW_TEST_CHANNELS = True
     if DEBUG:
         logit(MULTI_CH_TRAIN)
@@ -161,7 +168,7 @@ def main(**kwargs):
 
     # Train dataset path
     TRAIN_DATASET_PATH = direc + MODEL_NAME + f"_train_dataset_PL_{L}.npy"
-    # Train dataset path
+    # Test dataset path
     TEST_DATASET_PATH = direc + MODEL_NAME + f"_test_dataset_PL_{L}.npy"
 
     ######################################################################
@@ -176,18 +183,19 @@ def main(**kwargs):
 
     ######################################################################
     # Method used to generate channels
+    # Refer to `get_channels()` in `utils.py` for more details on the different available methods
     CHANNEL_GENERATION_METHOD = 'custom1'
 
-    # Location of the Base Station
+    # Location of the Base Station (BS)
     LOC_BS = 0 + 0j
-    # Location of the Intelligent Reflector
+    # Location of the Intelligent Reflective Surface (IRS)
     LOC_IRS = 150 + 0j
     # Distance between BS and IRS
     DIST_BS_IRS = np.abs(LOC_BS - LOC_IRS).astype(np.float32)
 
-    # Radius of the circle within which all users are found
+    # Radius of the circle within which all users are located
     RADIUS_USERS = 25.0     # 10.0
-    # Offset around which all users are found
+    # Offset around which the users circle is centered (in the complex plane)
     OFFSET_USERS = 150 + 30j
     # Location of the users
     if GENERATE_USER_LOCATIONS:
@@ -222,16 +230,14 @@ def main(**kwargs):
     # Total downlink power constraint
     TOTAL_POWER_CONSTRAINT_dBm = kwargs['down_power']
     TOTAL_POWER_CONSTRAINT = 1e-3*(10**(TOTAL_POWER_CONSTRAINT_dBm/10))
-    # print(TOTAL_POWER_CONSTRAINT)
 
     # Total uplink power constraint
     TOTAL_UP_POWER_CONSTRAINT_dBm = kwargs['up_power']
     TOTAL_UP_POWER_CONSTRAINT = 1e-3*(10**(TOTAL_UP_POWER_CONSTRAINT_dBm/10))
-    # print(TOTAL_UP_POWER_CONSTRAINT)
 
     ######################################################################
     ######################################################################
-    ### Making a parameters dictionary that we will pass into functions
+    ### Making a parameters dictionary
     PARAMS = {
         "num_bs": NUM_BS,
         "num_users": NUM_USERS,
@@ -279,9 +285,10 @@ def main(**kwargs):
     PARAMS['channels'] = channels
 
     ######################################################################
+    # The only difference between the following 2 functions is in the shape of the output dataset
     def get_dataset_MLP(choice, make_new, params=PARAMS):
         """
-        Function used to generate the dataset for training and testing
+        Function used to generate the dataset for training and testing of MLP
         Arguments:
         choice          Choice as to whether we want to make test or train dataset
         make_new        Boolean to indicate whether we want to create a new dataset or just load an old one
@@ -294,6 +301,7 @@ def main(**kwargs):
         }
         """
         if make_new:
+            # Channel is common for all batches if multi_ch_train is False
             if not params['multi_ch_train']:
                 # Channels
                 G = params['channels']['G'].astype(np.complex64)
@@ -302,7 +310,9 @@ def main(**kwargs):
 
             if choice == 'train':
                 dataset = np.zeros((params['num_train_samples'], 2*params['num_antennas']*params['pilot_length']), dtype = np.float32)
+                # We add the samples one-by-one to the dataset
                 for idx in range(params['num_train_samples']):
+                    # For multi-channel training, we use a different channel for each batch
                     if params['multi_ch_train']:
                         # Channels
                         G = params['channels']['G'][idx//params['batch_size']].astype(np.complex64)
@@ -364,8 +374,11 @@ def main(**kwargs):
 
             elif choice == 'test':
                 dataset = np.zeros((params['num_test_samples'], 2*params['num_antennas']*params['pilot_length']), dtype = np.float32)
+                # We add the samples one-by-one to the dataset
                 for idx in range(params['num_test_samples']):
+                    # For multi-channel training, we use a different channel for each batch
                     if params['multi_ch_train']:
+                        # if new_test_channels is True, the test channels are stored after the train channels
                         if params['new_test_channels']:
                             # Channels
                             G = params['channels']['G'][params['num_channels'] + (idx//params['batch_size'])].astype(np.complex64)
@@ -423,7 +436,7 @@ def main(**kwargs):
 
     def get_dataset_RNN(choice, make_new, params=PARAMS):
         """
-        Function used to generate the dataset for training and testing
+        Function used to generate the dataset for training and testing for RNN based networks
         Arguments:
         choice          Choice as to whether we want to make test or train dataset
         make_new        Boolean to indicate whether we want to create a new dataset or just load an old one
@@ -562,6 +575,7 @@ def main(**kwargs):
     # Saving the normalized train dataset
     np.save(PARAMS['train_dataset_path'], train_data)
 
+    # Forming a torch dataset and dataloader
     train_data = torch.tensor(train_data).to(device)
     train_dataset = TensorDataset(train_data)
     train_loader = DataLoader(train_dataset, batch_size=PARAMS['batch_size'], shuffle=False)
@@ -579,10 +593,12 @@ def main(**kwargs):
     # Saving the normalized test dataset
     np.save(PARAMS['test_dataset_path'], test_data)
 
+    # Forming a torch dataset and dataloader
     test_data = torch.tensor(test_data).to(device)
     test_dataset = TensorDataset(test_data)
     test_loader = DataLoader(test_dataset, batch_size=PARAMS['batch_size'], shuffle=False)
 
+    # Dictionary containing the train and test dataloaders
     loaders = {
         'train' : train_loader,    
         'test'  : test_loader
@@ -622,7 +638,7 @@ def main(**kwargs):
     else:
         sys.exit('$$$$$ main(): Invalid `which_model` to create `MODEL_PARAMS`.')
 
-    # Creating the model
+    # Creating the model and moving them to the device we are using
     if MODEL_PARAMS['type'] == 'WMMSE':
         model = UnfoldedWMMSE(model_params = MODEL_PARAMS, params = PARAMS)
         model = model.to(device)
@@ -655,16 +671,16 @@ def main(**kwargs):
     # Training, Test loops & Loss function
     def train_loop(loaders, model, loss_fn, optimizer, interval, params=PARAMS):
         """
-        Function to train the model and log required information
+        Function to train the model and log essential information
         Arguments:
-        loaders                 dict containing DataLoader objects for the data
+        loaders                 Dict containing DataLoader objects for the data
         model                   The neural network we want to train
         loss_fn                 The loss function we are trying to minimize
         optimizer               Optimizer that we will use
-        interval                Interval between logging of loss & calculating test metrics [default: 40]
+        interval                Interval between logging of loss & calculating test metrics
         params                  Parameters relevant to the run  [Default: PARAMS]
 
-        Returns:    Dict containing lists of training losses and test losses & accuracies.
+        Returns:    Dict containing lists of training losses and test losses    .
         """
         dataloader = loaders['train']
         size = len(dataloader.dataset)
@@ -673,6 +689,7 @@ def main(**kwargs):
         global losses_test_min
         global BATCH_ID
 
+        # Going through each batch in the training dataset
         for batch, X in enumerate(dataloader):
             BATCH_ID = batch
             # Compute prediction and loss
@@ -685,6 +702,7 @@ def main(**kwargs):
             loss.backward()
             optimizer.step()
 
+            # Periodically printing the loss and calculating test metrics
             if batch % interval == 0:
                 loss, current = loss.item(), batch * len(X[0])
                 logit('')
@@ -694,7 +712,7 @@ def main(**kwargs):
 
                 # Saving checkpoint if the model achieved here is the best performer on Test so far
                 if temp1['loss'] < losses_test_min:
-                    # Updating losses_test_min
+                    # Updating losses_test_min to contain the lowest test loss achieved so far
                     losses_test_min = temp1['loss']
                     logit("Saving Model Checkpoint -------------------- Test Loss: %.5f" % (temp1['loss']))
                     torch.save({
@@ -710,18 +728,20 @@ def main(**kwargs):
 
     def test_loop(loaders, model, loss_fn, params=PARAMS):
         '''
-        Function to calculate loss and accuracy of the model on the test set.
+        Function to calculate loss of the model on the test set.
         Arguments:
-        loaders                 dict containing DataLoader objects for the data
+        loaders                 Dict containing DataLoader objects for the data
         model                   The neural network we want to test
         loss_fn                 The loss function we are trying to minimize in training
-        Returns:    Dict containing loss and accuracy of the model on the test dataset
+
+        Returns:    Dict containing loss of the model on the test dataset
         '''
         dataloader = loaders['test']
         num_batches = len(dataloader)
         test_loss = 0
         global BATCH_ID
 
+        # Loss calculation for the entire test dataset
         with torch.no_grad():
             for batch, X in enumerate(dataloader):
                 if params['new_test_channels']:
@@ -732,7 +752,7 @@ def main(**kwargs):
                 test_loss += loss_fn(pred).item()
         test_loss /= num_batches
 
-        # Printing relevant metrics
+        # Printing test loss and sum rate
         logit("Test Metrics - Avg loss: %.5f, Sum Rate: %.5f" % (test_loss, -test_loss))
 
         return {
@@ -756,6 +776,7 @@ def main(**kwargs):
             R = torch.tensor(params['channels']['R'], device=device)
         else:
             # Getting the channels locally for simplicity of notation
+            # Getting the channel corresponding to this batch alone
             G = torch.tensor(params['channels']['G'][BATCH_ID], device=device)
             D = torch.tensor(params['channels']['D'][BATCH_ID], device=device)
             R = torch.tensor(params['channels']['R'][BATCH_ID], device=device)
@@ -808,7 +829,7 @@ def main(**kwargs):
             # Finding sum rate
             sum_rates[idx] = torch.sum(rates)
 
-        # Since we want to minimize the loss, we set loss to be - mean sum rate
+        # Since we want to minimize the loss, we set loss to be negative of mean sum rate
         loss = -torch.mean(sum_rates)
 
         return loss
@@ -816,6 +837,7 @@ def main(**kwargs):
     def sum_rate_loss_conj(output, params=PARAMS):
         """
         Function to calculate the loss. We will try to minimize this while training the network
+        Only difference is the extra conjugate operation in calculating tmp2
         Arguments:
         output              Output returned by the network
         params              All parameters relevant to our run
@@ -887,6 +909,8 @@ def main(**kwargs):
 
         return loss
 
+    # The following 2 loss functions are just optimized versions of the above 2 loss functions
+
     def opt_sum_rate_loss(output, params=PARAMS):
         """
         Function to calculate the loss. We will try to minimize this while training the network
@@ -943,6 +967,7 @@ def main(**kwargs):
         prod_abs_sq_diag = torch.diagonal(prod_abs_sq, dim1=1, dim2=2)            
         sum1 = torch.sum(prod_abs_sq, dim=2)
 
+        # Calculating SINR and rates
         sinr = prod_abs_sq_diag / (sum1 - prod_abs_sq_diag + params['sigma0']**2)
         rates = torch.log2(1 + sinr)
         sum_rates = torch.sum(rates, dim=1)
@@ -1007,6 +1032,7 @@ def main(**kwargs):
         prod_abs_sq_diag = torch.diagonal(prod_abs_sq, dim1=1, dim2=2)            
         sum1 = torch.sum(prod_abs_sq, dim=2)
 
+        # Calculating SINR and rates
         sinr = prod_abs_sq_diag / (sum1 - prod_abs_sq_diag + params['sigma0']**2)
         rates = torch.log2(1 + sinr)
         sum_rates = torch.sum(rates, dim=1)
@@ -1016,12 +1042,14 @@ def main(**kwargs):
 
     ######################################################################
     # Sum Rate Loss
-    # Of the above defined 4 loss functions, the ones with prefix 'opt_' are the ones that are optimized for parallelization
+    # Of the above defined 4 loss functions, the ones with prefix 'opt_' are optimized for parallelization
     loss_fn = opt_sum_rate_loss_conj
 
-    # Adam optimizer
+    # Optimizer
     optimizer = optim.Adam(model.parameters(), lr=PARAMS['lrate'])
     # optimizer = optim.SGD(model.parameters(), lr=PARAMS['lrate'], momentum=0.9)
+
+    # StepLR scheduler
     if PARAMS['use_LR_Plateau']:
         scheduler = torch.optim.lr_scheduler.StepLR(
             optimizer,
@@ -1031,14 +1059,17 @@ def main(**kwargs):
         )
 
     ######################################################################
-    # Measuring time taken for the training process
+    # Lists to store loss values obtained during training
     losses = []
     losses_test = []
+    # Variable to store the best test loss achieved so far
     global losses_test_min
     losses_test_min = np.inf
 
     interval = (PARAMS['num_train_samples']//PARAMS['batch_size'])//5
+    # Measuring time taken for the training process
     start = time.time()
+    # Running training for the required number of epochs
     for i in range(PARAMS['num_epochs']):
         logit('')
         logit('------------------------------------------------------')
@@ -1051,6 +1082,8 @@ def main(**kwargs):
             scheduler.step()
         losses += temp['losses']
         losses_test += temp['losses_test']
+
+    # Testing model on the test dataset after training
     temp = test_loop(loaders, model, loss_fn)
     losses_test.append(temp['loss'])
 
@@ -1063,17 +1096,14 @@ def main(**kwargs):
     # Saving the trained network
     torch.save(model, PARAMS['model_save_path'])
 
-    # Sum Rate at the end of training on the test dataset
+    # Logging some relevant loss values
     logit('Train Sum Rate of the last batch of training = %.5f' % (-losses[-1]))
     logit('Train Loss of the last batch of training = %.5f' % (losses[-1]))
     logit('Best Test Sum Rate achieved in training = %.5f' % (-losses_test_min))
     logit('Best Test Loss achieved in training = %.5f' % (losses_test_min))
-    # logit('Best Test Sum Rate after training = %.5f' % (-losses_test[-1]))
-    # logit('Best Test Loss after training = %.5f' % (losses_test[-1]))
 
     # Saving values to ret_list
     ret_list.extend([end-start, -losses_test_min, -losses[-1]])
-    # ret_list.extend([end-start, -losses_test[-1], -losses[-1]])
 
     # Plotting of training and test metrics
     prefix = direc + PARAMS['model_name'] + f'_PL_{PARAMS["pilot_length"]}'
@@ -1307,7 +1337,7 @@ def main(**kwargs):
     ret_list.append(np.mean(sum_rates))
 
     ######################################################################
-    # Random theta and Zero-Forcing
+    # Random theta and Zero-Forcing Beamforming
     num_samples = 100
     sum_rates = []
     for i in range(len(PARAMS['channels']['G'])):
@@ -1340,3 +1370,4 @@ def main(**kwargs):
     # Printing all the results together
     print('\n')
     print(ret_list)
+    print('\n')
