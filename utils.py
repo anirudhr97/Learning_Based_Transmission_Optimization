@@ -150,11 +150,11 @@ class BeamFormer(nn.Module):
             nn.Linear(model_params['n_neurons'], model_params['n_neurons']), 
             nn.LeakyReLU(negative_slope = 0.05)
         )
-        self.fc3 = nn.Sequential(
-            nn.Linear(model_params['n_neurons'], model_params['n_neurons']), 
-            nn.LeakyReLU(negative_slope = 0.05)
-        )
-        self.fc4 = nn.Linear(model_params['n_neurons'], model_params['n_neurons'])
+        # self.fc3 = nn.Sequential(
+        #     nn.Linear(model_params['n_neurons'], model_params['n_neurons']), 
+        #     nn.LeakyReLU(negative_slope = 0.05)
+        # )
+        self.fc3 = nn.Linear(model_params['n_neurons'], model_params['n_neurons'])
 
         self.output_BS = nn.Linear(model_params['n_neurons'], 2*self.params['num_antennas']*self.params['num_users'])
         self.output_IRS = nn.Linear(model_params['n_neurons'], 2*self.params['num_reflectors'])
@@ -167,9 +167,9 @@ class BeamFormer(nn.Module):
         values['fc1'] = self.fc1(x)
         values['fc2'] = self.fc2(values['fc1'])
         values['fc3'] = self.fc3(values['fc2'])
-        values['fc4'] = self.fc4(values['fc3'])
-        values['output_BS'] = self.output_BS(values['fc4'])
-        values['output_IRS'] = self.output_IRS(values['fc4'])
+        # values['fc4'] = self.fc4(values['fc3'])
+        values['output_BS'] = self.output_BS(values['fc3'])
+        values['output_IRS'] = self.output_IRS(values['fc3'])
 
         # Normalizing
         frob_norm = torch.sqrt(torch.sum(torch.square(values['output_BS']), dim=1))

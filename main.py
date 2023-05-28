@@ -194,7 +194,7 @@ def main(**kwargs):
     DIST_BS_IRS = np.abs(LOC_BS - LOC_IRS).astype(np.float32)
 
     # Radius of the circle within which all users are located
-    RADIUS_USERS = 25.0     # 10.0
+    RADIUS_USERS = 10.0     # 10.0
     # Offset around which the users circle is centered (in the complex plane)
     OFFSET_USERS = 150 + 30j
     # Location of the users
@@ -633,7 +633,7 @@ def main(**kwargs):
     elif which_model == 'MLP':
         MODEL_PARAMS = {
             'type': which_model,
-            'n_neurons': 200
+            'n_neurons': 100
         }
     else:
         sys.exit('$$$$$ main(): Invalid `which_model` to create `MODEL_PARAMS`.')
@@ -1105,6 +1105,12 @@ def main(**kwargs):
     # Saving values to ret_list
     ret_list.extend([end-start, -losses_test_min, -losses[-1]])
 
+    # Savinng the losses to a file
+    losses_sv = np.array(losses)
+    losses_test_sv = np.array(losses_test)
+    np.save(direc + PARAMS['model_name'] + f'_PL_{PARAMS["pilot_length"]}_losses.npy', losses_sv)
+    np.save(direc + PARAMS['model_name'] + f'_PL_{PARAMS["pilot_length"]}_losses_test.npy', losses_test_sv)
+
     # Plotting of training and test metrics
     prefix = direc + PARAMS['model_name'] + f'_PL_{PARAMS["pilot_length"]}'
     plotGraphs(losses, losses_test, interval, prefix)
@@ -1134,7 +1140,7 @@ def main(**kwargs):
 
         return beamformers, IRS_coeff
 
-    def water_fill(heights, power, params=PARAMS):
+    def water_fill(heights, power):
         assert power > 0
         
         # Sorting the heights in ascending order
@@ -1174,7 +1180,7 @@ def main(**kwargs):
             tmp_list = []
             for j in range(params['num_users']):
                 tmp_list.append(H[j].conj().T @ cov[j] @ H[j])
-            tmp_list_sum = np.sum(tmp_list)
+            tmp_list_sum = np.sum(tmp_list, axis=0)
 
             Dinv_diag_list = []
             U_list = []
@@ -1229,7 +1235,7 @@ def main(**kwargs):
         for i in range(irs.shape[0]):
             # Net channel we will use for capacity calculation
             # Each row corresponds to H1 for each user
-            net_ch = np.expand_dims(((D + G@np.diag(irs[i])@R)/PARAMS['sigma0']).T, axis=1)
+            net_ch = np.expand_dims(((D + G@np.diag(irs[i])@R)/PARAMS['sigma0']).T.conj(), axis=1)
             cap_vals.append(calc_capacity(net_ch))
         
         if batch == num_batches_cap-1:
@@ -1268,7 +1274,7 @@ def main(**kwargs):
             for i in range(PARAMS['num_users']):
                 d = D[:, i:i+1]
                 r = R[:, i:i+1]
-                tmp2 = (d + tmp1@r).T
+                tmp2 = (d + tmp1@r).T.conj()
                 temp = np.square(np.abs(np.squeeze(tmp2@bf)))
                 temp_sum = np.sum(temp)
                 # Calculating the rate for the ith user
@@ -1289,7 +1295,8 @@ def main(**kwargs):
         R = PARAMS['channels']['R'][i]
 
         beamformers = generate_complex_gaussian_array((num_samples, PARAMS['num_antennas'], PARAMS['num_users']))
-        IRS_coeff = generate_complex_gaussian_array((num_samples, PARAMS['num_reflectors']))
+        # IRS_coeff = generate_complex_gaussian_array((num_samples, PARAMS['num_reflectors']))
+        IRS_coeff = np.exp(1j*2*np.pi*np.random.rand(num_samples, PARAMS['num_reflectors']))
 
         # Normalizing
         IRS_coeff = np.divide(IRS_coeff, np.abs(IRS_coeff))
@@ -1314,16 +1321,17 @@ def main(**kwargs):
         D = PARAMS['channels']['D'][i]
         R = PARAMS['channels']['R'][i]
 
-        IRS_coeff = generate_complex_gaussian_array((num_samples, PARAMS['num_reflectors']))
+        # IRS_coeff = generate_complex_gaussian_array((num_samples, PARAMS['num_reflectors']))
+        IRS_coeff = np.exp(1j*2*np.pi*np.random.rand(num_samples, PARAMS['num_reflectors']))
         IRS_coeff = np.divide(IRS_coeff, np.abs(IRS_coeff))
 
-        beamformers = np.zeros((num_samples, PARAMS['num_antennas'], PARAMS['num_users']), dtype=complex)
+        beamformers = np.zeros((num_samples, PARAMS['num_antennas'], PARAMS['num_users']), dtype=np.complex64)
 
         for idx in range(num_samples):
             irs = IRS_coeff[idx]
 
             full_ch = D + G@np.diag(irs)@R
-            beamformers[idx] = full_ch.conj()
+            beamformers[idx] = full_ch
 
         frob_norm = np.linalg.norm(beamformers, axis=(1,2))
         BS_normalizing_factor = (PARAMS['total_power_constraint']**0.5)/frob_norm
@@ -1345,16 +1353,17 @@ def main(**kwargs):
         D = PARAMS['channels']['D'][i]
         R = PARAMS['channels']['R'][i]
 
-        IRS_coeff = generate_complex_gaussian_array((num_samples, PARAMS['num_reflectors']))
+        # IRS_coeff = generate_complex_gaussian_array((num_samples, PARAMS['num_reflectors']))
+        IRS_coeff = np.exp(1j*2*np.pi*np.random.rand(num_samples, PARAMS['num_reflectors']))
         IRS_coeff = np.divide(IRS_coeff, np.abs(IRS_coeff))
 
-        beamformers = np.zeros((num_samples, PARAMS['num_antennas'], PARAMS['num_users']), dtype=complex)
+        beamformers = np.zeros((num_samples, PARAMS['num_antennas'], PARAMS['num_users']), dtype=np.complex64)
 
         for idx in range(num_samples):
             irs = IRS_coeff[idx]
 
             full_ch = D + G@np.diag(irs)@R
-            beamformers[idx] = np.linalg.pinv(full_ch.T)
+            beamformers[idx] = np.linalg.pinv(full_ch.T.conj())
 
         frob_norm = np.linalg.norm(beamformers, axis=(1,2))
         BS_normalizing_factor = (PARAMS['total_power_constraint']**0.5)/frob_norm
